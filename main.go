@@ -2,202 +2,165 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
-func logo() { // This func is for printing the tool logo, nothing else.
-	fmt.Println("\n\t\t /$$   /$$  /$$$$$$   /$$$$$$   /$$$$$$  /$$$$$$$                         ")
-	fmt.Println("\t\t| $$  / $$ /$$__  $$ /$$__  $$ /$$__  $$| $$__  $$                        ")
-	fmt.Println("\t\t|  $$/ $$/| $$  \\__/| $$  \\__/| $$  \\ $$| $$  \\ $$      /$$$$$$   /$$$$$$ ")
-	fmt.Println("\t\t \\  $$$$/ |  $$$$$$ |  $$$$$$ | $$  | $$| $$$$$$$/     /$$__  $$ /$$__  $$")
-	fmt.Println("\t\t  >$$  $$  \\____  $$ \\____  $$| $$  | $$| $$__  $$    | $$  \\ $$| $$  \\ $$")
-	fmt.Println("\t\t /$$/\\  $$ /$$  \\ $$ /$$  \\ $$| $$  | $$| $$  \\ $$    | $$  | $$| $$  | $$")
-	fmt.Println("\t\t| $$  \\ $$|  $$$$$$/|  $$$$$$/|  $$$$$$/| $$  | $$ /$$|  $$$$$$$|  $$$$$$/")
-	fmt.Println("\t\t|__/  |__/ \\______/  \\______/  \\______/ |__/  |__/|__/ \\____  $$ \\______/ ")
-	fmt.Println("\t\t                                                       /$$  \\ $$          ")
-	fmt.Println("\t\t           Xssor Tool By @SirBugs .go Version         |  $$$$$$/          ")
-	fmt.Println("\t\t               V: 1.0.4 Made With All Love             \\______/           ")
-	fmt.Println("\t\t      For Checking The XSS Reflections In The URLS ")
-	fmt.Println("\t\t           Twitter@SirBagoza / GitHub@SirBugs")
-	fmt.Println("\t\t                Run: go run main.go file\n")
+var (
+	already_done []string
+	payload      string
+	appendMode   bool
+	rawMode      bool
+	client       *http.Client
+	wg           sync.WaitGroup
+)
+
+func init() {
+	flag.StringVar(&payload, "p", "BAGOZAXSSOR>", "Payload to inject")
+	flag.BoolVar(&appendMode, "a", false, "Append the payload instead of replacing value")
+	flag.BoolVar(&rawMode, "raw", false, "Send payload raw without URL encoding")
 }
 
-var already_done []string // A Slice To Store All The URLS, To Bypass The Duplicates.
-
-func DoesSliceContains(mySlice []string, myStr string) bool { // This func is specially created to check if the slice has an item! Cuz Golang doesn't have a function to do this job!
-	for _, Value := range mySlice {
-		if Value == myStr {
+func DoesSliceContains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
 			return true
 		}
 	}
 	return false
-} // End Of My func.
-
-func rzlt_file() { // This func is created for checking if the results file if exist or not
-
-	if _, err := os.Stat("xssor_rzlts.txt"); err != nil {
-		f, err := os.Create("xssor_rzlts.txt") // Creating the file if it's not existing
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer f.Close()
-		fmt.Println("[ ! ] Creating Results File [xssor_rzlts.txt] ..") // output_msg
-	} else { // Already rzlts file is found, No need to create or replace it.
-		fmt.Println("[ ! ] XSSOR Results File Is Already Available, Checking Finished.") // output_msg
-	}
-
 }
 
-func make_empty_url(URI string) string { // This func is for making an empty url, Just having the domain and the param names
-	// This code was cutfrom (line:81-95)
-	empty_url := URI
-	// fmt.Println(empty_url)
-
-	if strings.Contains(URI, "?") && strings.Contains(URI, "=") {
-		url_split := strings.Split(URI, "?")       // Step.1 Of Spltting
-		params := strings.Split(url_split[1], "&") // Step.2 Of Splitting
-
-		for _, full_param := range params {
-			if strings.Contains(full_param, "=") {
-				splitted_param := strings.Split(full_param, "=") // Step.3 Of Splitting
-				empty_url = strings.ReplaceAll(empty_url, splitted_param[0]+"="+splitted_param[1], "")
-			}
-		}
-	} else {
-		// fmt.Println("This URL Is Not Valid!")
-		empty_url = "NotValidURL"
-	}
-	return empty_url // Returning the "string" value
-
-}
-
-func make_url(URI string) string { // This func is created to replace all the params in the url with my KEY: "BAGOZAXSSOR>", Then returning it
-
-	// Here we are going through 3 splitting steps!
-	// 1. Splitting the main url from "?", Which indexing[1] Would be the params part
-	// 2. Splitting the params from "&", if there's more than a parameter in the url
-	// 3. Splitting each param from "=", To get the param_name / param_value
-
+func make_url(URI string) string {
 	used_url := URI
 	empty_url := URI
+
 	if strings.Contains(used_url, "?") && strings.Contains(used_url, "=") {
-		url_split := strings.Split(URI, "?")       // Step.1 Of Spltting
-		params := strings.Split(url_split[1], "&") // Step.2 Of Splitting
+		url_split := strings.Split(URI, "?")
+		params := strings.Split(url_split[1], "&")
 
 		for _, full_param := range params {
 			if strings.Contains(full_param, "=") {
-				splitted_param := strings.Split(full_param, "=")                                                                    // Step.3 Of Splitting
-				used_url = strings.ReplaceAll(used_url, splitted_param[0]+"="+splitted_param[1], splitted_param[0]+"=BAGOZAXSSOR>") // Replacing All the params with my Key, Which is: "BAGOZAXSSOR>"
-				empty_url = strings.ReplaceAll(empty_url, splitted_param[0]+"="+splitted_param[1], "")
+				splitted_param := strings.SplitN(full_param, "=", 2)
+				key, val := splitted_param[0], splitted_param[1]
+
+				if appendMode {
+					// append payload
+					used_url = strings.ReplaceAll(used_url, key+"="+val, key+"="+val+payload)
+				} else {
+					// replace payload
+					used_url = strings.ReplaceAll(used_url, key+"="+val, key+"="+payload)
+				}
+
+				empty_url = strings.ReplaceAll(empty_url, key+"="+val, "")
 			}
 		}
-		if DoesSliceContains(already_done, empty_url) {
-			fmt.Printf("")
-		} else {
+
+		if !DoesSliceContains(already_done, empty_url) {
 			already_done = append(already_done, empty_url)
 		}
 
 	} else {
-		used_url = "NotValidURL" // If The URL Doesn't has "?" at all, so it's fake one! We don't need it.
+		used_url = "NotValidURL"
 	}
 	return used_url
-
 }
 
-func req(URI string) { // This func is to make the GET request for all converted URLs
+func req(URI string, f *os.File) {
+	defer wg.Done()
 
-	// This func is going through 4 steps
-	// 1. Opening new Client and making the request ready, Setting Real User, Prepare!
-	// 2. Making the request (Client.Do(req))
-	// 3. Checking for the relfections with ">" or not or no reflections at all!
-	// 4. Saving the output to my "xssor_rzlts.txt" file
-
-	client := http.Client{ // Creating new client to make our request
-		Timeout: 5 * time.Second, // Setting Timeout: 5 Seconds
-	}
-	req, err := http.NewRequest("GET", URI, nil) // Making My Request
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/109.0") // Setting To Real User-Agent
-	resp, err := client.Do(req)                                                                                          // Sending the request
-	if resp == nil {
-		fmt.Printf("[ ! ] :: NotAvlbl :- %v\n", URI) // There's No Response? and we getting <nil>. So there's no source and this URL is not opening, Not Real, Not Live
+	var targetURL string
+	if rawMode {
+		targetURL = URI
 	} else {
-		body, err := ioutil.ReadAll(resp.Body) // We got a response, We Reading it now
-		if err != nil {
-			log.Fatal(err)
-		}
-		// fmt.Println(string(body))
-		f, err := os.OpenFile("xssor_rzlts.txt", os.O_APPEND|os.O_WRONLY, 0644) // Opening The Results File
-		// #Update: Added a fix of faking the xss alerts V 1.0.3
-		// Now It's checking if the StatusCode == 200 , Cuz if it's not 200 that mean that it's loading or redirecting or anything
-		// Which would may lead to faking an xss alert without encoding or something
-		if strings.Contains(string(body), "BAGOZAXSSOR>") && resp.StatusCode == 200 { // Found XSS Full Reflection
-			fmt.Printf("[ $ ] :: XSS Vuln :- %v\n", URI)
-			f.WriteString("[ $ ] XSS :: " + URI + "\n") // Appending Result !!
-		} else if strings.Contains(string(body), "BAGOZAXSSOR") && resp.StatusCode == 200 { // Found Only Reflection For my Word: "BAGOZAXSSOR" But Without ">"
-			fmt.Printf("[ * ] :: Reflection :- %v\n", URI)
-			f.WriteString("[ * ] Reflection :: " + URI + "\n") // Appending Result !!
-		} else { // Found No Reflections !!
-			fmt.Printf("[ X ] :: Nothing :- %v\n", URI)
-			// #Update: Removed the auto saving for the nothing V 1.0.2
-			// This would lead to making the file of rzlts big with no important data at all
-			// So I commented the nothing saving line, Which is then next one below:
-			// f.WriteString("[ * ] Nothing :: " + URI + "\n") // Appending Result !!
-		}
-		f.Close() // Closing My File.
+		// encode payload part only
+		encodedPayload := url.QueryEscape(payload)
+		targetURL = strings.ReplaceAll(URI, payload, encodedPayload)
 	}
 
+	req, err := http.NewRequest("GET", targetURL, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("User-Agent", "GxssScanner/1.0")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	body, _ := ioutil.ReadAll(resp.Body)
+	bodyStr := string(body)
+
+	if rawMode {
+		if strings.Contains(bodyStr, payload) && resp.StatusCode == 200 {
+			fmt.Printf("[ $ ] :: XSS Vuln (payload: %s) :- %v\n", payload, URI)
+			f.WriteString("[ $ ] XSS :: " + URI + "\n")
+		} else if strings.Contains(bodyStr, strings.TrimRight(payload, ">")) && resp.StatusCode == 200 {
+			fmt.Printf("[ * ] :: Reflection (payload: %s) :- %v\n", payload, URI)
+			f.WriteString("[ * ] Reflection :: " + URI + "\n")
+		} else {
+			fmt.Printf("[ X ] :: Nothing :- %v\n", URI)
+		}
+	} else {
+		encodedPayload := url.QueryEscape(payload)
+		if (strings.Contains(bodyStr, payload) || strings.Contains(bodyStr, encodedPayload)) && resp.StatusCode == 200 {
+			fmt.Printf("[ $ ] :: XSS Vuln (payload: %s) :- %v\n", payload, URI)
+			f.WriteString("[ $ ] XSS :: " + URI + "\n")
+		} else if (strings.Contains(bodyStr, strings.TrimRight(payload, ">")) ||
+			strings.Contains(bodyStr, strings.TrimRight(encodedPayload, "%3E"))) && resp.StatusCode == 200 {
+			fmt.Printf("[ * ] :: Reflection (payload: %s) :- %v\n", payload, URI)
+			f.WriteString("[ * ] Reflection :: " + URI + "\n")
+		} else {
+			fmt.Printf("[ X ] :: Nothing :- %v\n", URI)
+		}
+	}
 }
 
-func main() { // Main running Function
+func main() {
+	flag.Parse()
 
-	// This func is going through 3 steps:
-	// 1. Checking if the rzlts file if found or not and creating it if it's not. func rzlt_file(). (line:43)
-	// 2. Recieving Arg[1] it's my file.txt Containing all the grepped "\?" URLs, and looping through it LINE BY LINE.
-	// 3. Validating If It's real URL or not, Then Starting req(make_url(URL))
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client = &http.Client{Transport: tr, Timeout: 15 * time.Second}
 
-	logo()
+	if flag.NArg() < 1 {
+		fmt.Println("Usage: gxss [-a] [-p payload] [--raw] urls.txt")
+		os.Exit(1)
+	}
 
-	fmt.Println("[ ! ] This .go Version had posted on 30/1/2023 By @SirBugs")
-	rzlt_file() // (line:43)
-	fmt.Println("[ ! ] Starting Running Now ..!\n")
-
-	file := os.Args[1]           // Receiving Arg[1], Run as: ```go run main.go file.txt```
-	myFile, err := os.Open(file) // Opening The File
+	urlsFile := flag.Arg(0)
+	file, err := os.Open(urlsFile)
 	if err != nil {
 		log.Fatal(err)
 	}
-	newScanner := bufio.NewScanner(myFile) // Scanning The File
+	defer file.Close()
 
-	for newScanner.Scan() { // Getting Text() from the Scan() of each line with for loop
-		if make_empty_url(newScanner.Text()) != "NotValidURL" {
-			if DoesSliceContains(already_done, make_empty_url(newScanner.Text())) {
-				fmt.Printf("") // "[ - ] Duplicated URL, ByPassed !!"
-			} else {
-				if make_url(newScanner.Text()) != "NotValidURL" && strings.Contains(make_url(newScanner.Text()), "=") { // Filter For Validating If It's Prefect URL or not.
-					go req(make_url(newScanner.Text())) // Using goroutines to make the requests faster!
-					// #Update: Added a fix of faking the xss alerts V 1.0.4
-					// Increased the Sleeping time from 50 to 85, Cuz this in some cases if the website is caching or something
-					// This would may lead to faking the xss alerts
-					time.Sleep(85 * time.Millisecond)
-				} else {
-					fmt.Println("This time bypassed !!") // Output Print MSG Result For Not a Valid url, Not containing "?" and "="
-				}
-			}
-		} else {
-			fmt.Printf("") // "[ - ] NotValid/Bad URL, ByPassed !!"
+	outFile, err := os.OpenFile("xssor_rzlts.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer outFile.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		u := make_url(line)
+		if u != "NotValidURL" {
+			wg.Add(1)
+			go req(u, outFile)
 		}
 	}
-	time.Sleep(7 * time.Second) // Waiting 7 seconds, Why 7? Interesting Question!!
-	// and 7 cuz of the maximum timeout of each request is 5 seconds (line:113), to handle all the requests till the last one.
-
+	wg.Wait()
 }
